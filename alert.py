@@ -5,53 +5,78 @@ import sys
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
+
 def send_to_slack(text):
     print("➡️ Sending to Slack...")
+
     if not SLACK_WEBHOOK_URL:
         print("❌ SLACK_WEBHOOK_URL is missing")
         sys.exit(1)
 
-    r = requests.post(SLACK_WEBHOOK_URL, json={"text": text})
-    print("Slack status:", r.status_code)
+    try:
+        response = requests.post(
+            SLACK_WEBHOOK_URL,
+            json={"text": text}
+        )
+
+        print("Slack Status Code:", response.status_code)
+        print("Slack Response:", response.text)
+
+    except Exception as e:
+        print("❌ Slack error:", str(e))
+
+
+def fetch_osv_vulns():
+    url = "https://api.osv.dev/v1/query"
+
+    since = (datetime.utcnow() - timedelta(hours=12)).isoformat() + "Z"
+
+    payload = {
+        "query": {
+            "modified_since": since
+        }
+    }
+
+    print("📡 Calling OSV API...")
+
+    response = requests.post(url, json=payload)
+
+    print("OSV Status:", response.status_code)
+
+    data = response.json()
+    vulns = data.get("vulns", [])
+
+    print(f"📊 Found {len(vulns)} vulnerabilities")
+
+    return vulns
 
 
 def main():
-    try:
-        print("🚀 Script started")
+    print("🚀 Script started")
 
-        url = "https://api.osv.dev/v1/query"
-        since = (datetime.utcnow() - timedelta(hours=12)).isoformat() + "Z"
+    # 🔥 Step 1: Always send test message
+    send_to_slack("🔥 TEST: Slack integration is working!")
 
-        payload = {
-            "query": {
-                "modified_since": since
-            }
-        }
+    # 🔍 Step 2: Fetch OSV data
+    vulns = fetch_osv_vulns()
 
-        print("📡 Calling OSV API...")
-        response = requests.post(url, json=payload)
+    if not vulns:
+        print("✅ No vulnerabilities found")
+        return
 
-        print("Status Code:", response.status_code)
-        print("Raw Response:", response.text[:500])  # print partial response
+    # 🚨 Step 3: Send first vulnerability (demo)
+    first = vulns[0]
+    vuln_id = first.get("id", "N/A")
+    summary = first.get("summary", "No summary")
 
-        data = response.json()
+    message = f"""
+🚨 SUPPLY CHAIN ALERT
 
-        vulns = data.get("vulns", [])
-        print(f"📊 Found {len(vulns)} vulnerabilities")
+ID: {vuln_id}
+Summary: {summary}
+"""
 
-        if not vulns:
-            print("✅ No vulnerabilities found")
-            return
-
-        first = vulns[0]
-        summary = first.get("summary", "No summary")
-
-        send_to_slack(f"🚨 Test Alert:\n{summary}")
-
-    except Exception as e:
-        print("🔥 ERROR OCCURRED:")
-        print(str(e))
-        sys.exit(1)
+    send_to_slack(message)
 
 
 if __name__ == "__main__":
