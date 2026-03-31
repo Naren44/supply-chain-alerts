@@ -1,29 +1,26 @@
 import requests
 from datetime import datetime, timedelta
 import os
-import sys
 
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
+KEYWORDS = [
+    "malicious",
+    "typosquat",
+    "dependency confusion",
+    "backdoor",
+    "credential",
+    "token",
+    "exfiltrate"
+]
+
 
 def send_to_slack(text):
-    print("➡️ Sending to Slack...")
-
     if not SLACK_WEBHOOK_URL:
-        print("❌ SLACK_WEBHOOK_URL is missing")
-        sys.exit(1)
+        print("❌ Missing Slack webhook")
+        return
 
-    try:
-        response = requests.post(
-            SLACK_WEBHOOK_URL,
-            json={"text": text}
-        )
-
-        print("Slack Status Code:", response.status_code)
-        print("Slack Response:", response.text)
-
-    except Exception as e:
-        print("❌ Slack error:", str(e))
+    requests.post(SLACK_WEBHOOK_URL, json={"text": text})
 
 
 def fetch_osv_vulns():
@@ -37,46 +34,56 @@ def fetch_osv_vulns():
         }
     }
 
-    print("📡 Calling OSV API...")
-
     response = requests.post(url, json=payload)
-
-    print("OSV Status:", response.status_code)
-
     data = response.json()
-    vulns = data.get("vulns", [])
 
-    print(f"📊 Found {len(vulns)} vulnerabilities")
+    return data.get("vulns", [])
 
-    return vulns
+
+def is_relevant(v):
+    vuln_id = v.get("id", "").lower()
+    summary = v.get("summary", "").lower()
+
+    if vuln_id.startswith("mal"):
+        return True
+
+    return any(k in summary for k in KEYWORDS)
 
 
 def main():
-    print("🚀 Script started")
+    print("🚀 Running supply chain scan...")
 
-    # 🔥 Step 1: Always send test message
-    send_to_slack("🔥 TEST: Slack integration is working!")
-
-    # 🔍 Step 2: Fetch OSV data
     vulns = fetch_osv_vulns()
 
-    if not vulns:
-        print("✅ No vulnerabilities found")
-        return
+    alerts = 0
 
-    # 🚨 Step 3: Send first vulnerability (demo)
-    first = vulns[0]
-    vuln_id = first.get("id", "N/A")
-    summary = first.get("summary", "No summary")
+    for v in vulns:
+        if not is_relevant(v):
+            continue
 
-    message = f"""
+        affected = v.get("affected", [])
+        if not affected:
+            continue
+
+        pkg = affected[0].get("package", {})
+        name = pkg.get("name", "unknown")
+        ecosystem = pkg.get("ecosystem", "unknown")
+
+        message = f"""
 🚨 SUPPLY CHAIN ALERT
 
-ID: {vuln_id}
-Summary: {summary}
+📦 Package: {name}
+🧬 Ecosystem: {ecosystem}
+🆔 ID: {v.get("id")}
+
+📝 {v.get("summary")}
 """
 
-    send_to_slack(message)
+        send_to_slack(message)
+        alerts += 1
+
+    if alerts == 0:
+        print("✅ No relevant supply chain threats")
 
 
 if __name__ == "__main__":
